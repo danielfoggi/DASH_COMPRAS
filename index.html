@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard de Estoque Avançado com IA</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- SheetJS for Excel Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- Chart.js for Pie Chart -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js Datalabels Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0/dist/chartjs-plugin-datalabels.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        /* Estilo para o cabeçalho fixo */
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .sortable-header {
+            cursor: grab;
+            user-select: none;
+            height: 4rem; /* Aumenta a altura */
+            vertical-align: middle; /* Alinha o texto verticalmente */
+        }
+        .sortable-header:active {
+            cursor: grabbing;
+        }
+        .sort-icon {
+            margin-left: 8px;
+            color: #9ca3af;
+            transition: color 0.2s;
+        }
+        .sortable-header.sorted .sort-icon {
+            color: #1f2937;
+        }
+        .modal-content {
+            max-height: 80vh;
+        }
+        .editable-input {
+            border: 1px solid transparent;
+            padding: 4px;
+            border-radius: 4px;
+            width: 5rem;
+            text-align: center;
+        }
+        .editable-input:hover {
+            border-color: #d1d5db;
+        }
+        .editable-input:focus {
+            outline: none;
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 1px #4f46e5;
+        }
+        .dragging {
+            opacity: 0.5;
+            background: #d1d5db;
+        }
+        .drag-over {
+           border-right: 2px solid #2563eb;
+        }
+        .accounting-format {
+            display: flex;
+            justify-content: space-between;
+            padding: 0 4px;
+        }
+        #product-list tr, #cisco-alert-list tr, #ciscobr-alert-list tr {
+            cursor: pointer;
+        }
+        /* Estilos para seleção de linhas */
+        #product-list.has-selection tr {
+            opacity: 0.65;
+            transition: opacity 0.3s ease-in-out;
+        }
+        .highlighted-row {
+            background-color: rgba(45, 159, 136, 0.5) !important; /* #2D9F88 com 50% de transparência */
+            opacity: 1 !important;
+        }
+        .alert-table-font td {
+            font-size: 11px;
+        }
+        .aging-highlight {
+            background-color: #fef9c3; /* yellow-100 */
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body class="antialiased text-gray-800">
+
+    <div id="app" class="min-h-screen">
+        <!-- Cabeçalho -->
+        <header id="main-header" class="bg-[#005758] text-white shadow-lg">
+            <div class="max-w-screen-2xl mx-auto p-4 flex justify-between items-center">
+                <h1 class="text-2xl font-bold">TD SYNNEX | Dashboard de Estoque Avançado</h1>
+            </div>
+        </header>
+
+        <main id="main-content" class="p-4 sm:p-6 lg:p-8">
+            <div class="max-w-screen-2xl mx-auto">
+                <!-- Métricas de Inventário -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8 fade-in">
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-center text-center">
+                        <h2 class="text-sm font-medium text-gray-500">VALOR TOTAL INVENTÁRIO (USD)</h2>
+                        <p id="totalInventoryUSD" class="text-4xl font-bold text-gray-900 mt-2">US$ 0,00</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-center text-center">
+                        <h2 class="text-sm font-medium text-gray-500">COMPOSIÇÃO DO INVENTÁRIO (BRL)</h2>
+                        <div class="h-40 mt-2 flex items-center justify-center">
+                            <canvas id="inventoryPieChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col justify-center text-center">
+                        <h2 class="text-sm font-medium text-gray-500">VALOR TOTAL INVENTÁRIO (BRL)</h2>
+                        <p id="totalInventoryBRL" class="text-4xl font-bold text-gray-900 mt-2">R$ 0,00</p>
+                    </div>
+                </div>
+
+                <!-- Alertas de Estoque Baixo -->
+                <div id="alertSection" class="mb-8 fade-in">
+                    <div class="flex justify-between items-center mb-3">
+                        <h2 class="text-xl font-semibold text-gray-800 flex items-center">
+                            <i class="fas fa-exclamation-triangle text-yellow-500 mr-3"></i>
+                            Alertas de Estoque Baixo
+                        </h2>
+                         <div class="flex items-center space-x-2">
+                            <button id="exportUsdBtn" class="bg-green-600 text-white font-semibold py-2 px-3 rounded-lg shadow-sm hover:bg-green-700 transition duration-300 text-sm flex items-center">
+                                <i class="fas fa-file-excel mr-2"></i>
+                                Exportar Price List USD
+                            </button>
+                             <button id="exportBrlBtn" class="bg-green-600 text-white font-semibold py-2 px-3 rounded-lg shadow-sm hover:bg-green-700 transition duration-300 text-sm flex items-center">
+                                <i class="fas fa-file-excel mr-2"></i>
+                                Exportar Price List BRL
+                            </button>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <!-- Tabela Price List USD -->
+                        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                            <h3 class="text-lg font-semibold text-white bg-[#005758] p-4">Price List USD</h3>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-sm">
+                                    <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                                        <tr>
+                                            <th class="px-2 py-2 w-12"><input type="checkbox" class="select-all-alert" data-vendor="CISCO"></th>
+                                            <th class="px-4 py-2 text-left">MFG#</th>
+                                            <th class="px-4 py-2 text-left">SKU</th>
+                                            <th class="px-4 py-2 text-center">Mínimo</th>
+                                            <th class="px-4 py-2 text-center">Fast Track</th>
+                                            <th class="px-4 py-2 text-right">FOB</th>
+                                            <th class="px-4 py-2 text-center">Comprar</th>
+                                            <th class="px-4 py-2 text-right">Valor Compra (FOB)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="cisco-alert-list" class="alert-table-font"></tbody>
+                                    <tfoot class="bg-gray-100 font-bold"><tr id="cisco-alert-footer"></tr></tfoot>
+                                </table>
+                            </div>
+                        </div>
+                        <!-- Tabela Price List BRL -->
+                        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                            <h3 class="text-lg font-semibold text-white bg-[#005758] p-4">Price List BRL</h3>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-sm">
+                                    <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                                         <tr>
+                                            <th class="px-2 py-2 w-12"><input type="checkbox" class="select-all-alert" data-vendor="CISCOBR"></th>
+                                            <th class="px-4 py-2 text-left">MFG#</th>
+                                            <th class="px-4 py-2 text-left">SKU</th>
+                                            <th class="px-4 py-2 text-center">Mínimo</th>
+                                            <th class="px-4 py-2 text-center">Fast Track</th>
+                                            <th class="px-4 py-2 text-right">FOB</th>
+                                            <th class="px-4 py-2 text-center">Comprar</th>
+                                            <th class="px-4 py-2 text-right">Valor Compra (FOB)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="ciscobr-alert-list" class="alert-table-font"></tbody>
+                                    <tfoot class="bg-gray-100 font-bold"><tr id="ciscobr-alert-footer"></tr></tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabela de Produtos -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden fade-in">
+                     <div class="p-4 bg-[#005758] text-white flex justify-between items-center">
+                        <h2 class="text-xl font-semibold">Estoque Cisco TD SYNNEX</h2>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left text-gray-500">
+                            <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                                <tr id="table-headers">
+                                    <!-- Cabeçalhos serão renderizados pelo JS -->
+                                </tr>
+                            </thead>
+                            <tbody id="product-list">
+                               <tr id="loadingState"><td colspan="17" class="text-center py-10"><i class="fas fa-spinner fa-spin text-2xl text-gray-400"></i><p class="mt-2 text-gray-500">A carregar produtos...</p></td></tr>
+                               <tr id="emptyState" class="hidden"><td colspan="17" class="text-center py-10"><i class="fas fa-box-open text-4xl text-gray-300"></i><p class="mt-4">Nenhum produto encontrado.</p></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Tabela de Alerta de Aging -->
+                <div class="mt-8 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden fade-in">
+                     <div class="p-4 bg-[#005758] text-white flex justify-between items-center">
+                        <h2 class="text-xl font-semibold">Alerta de Aging</h2>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left text-gray-500">
+                            <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-3">VENDOR</th>
+                                    <th class="px-4 py-3">MFG#</th>
+                                    <th class="px-4 py-3">SKU</th>
+                                    <th class="px-4 py-3 text-right">FOB</th>
+                                    <th class="px-4 py-3 text-center">QTY</th>
+                                    <th class="px-4 py-3 text-center">&lt;30</th>
+                                    <th class="px-4 py-3 text-center">&gt;30</th>
+                                    <th class="px-4 py-3 text-center">&gt;60</th>
+                                    <th class="px-4 py-3 text-center">&gt;90</th>
+                                    <th class="px-4 py-3 text-center">&gt;120</th>
+                                    <th class="px-4 py-3 text-center">&gt;150</th>
+                                    <th class="px-4 py-3 text-center">&gt;180</th>
+                                </tr>
+                            </thead>
+                            <tbody id="aging-alert-list">
+                                <!-- Conteúdo será gerado via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <div id="productModal" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-xl p-8 w-full max-w-4xl m-4 transform transition-all duration-300 ease-in-out scale-95 modal-content overflow-y-auto">
+            <h2 id="modalTitle" class="text-2xl font-bold mb-6">Editar Produto</h2>
+            <form id="productForm">
+                <input type="hidden" id="productId">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="space-y-4">
+                        <div><label for="vendor" class="block text-sm font-medium text-gray-700 mb-1">VENDOR</label><input type="text" id="vendor" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></div>
+                        <div><label for="sku" class="block text-sm font-medium text-gray-700 mb-1">SKU</label><input type="text" id="sku" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm" required></div>
+                        <div><label for="mfg" class="block text-sm font-medium text-gray-700 mb-1">MFG#</label><input type="text" id="mfg" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></div>
+                    </div>
+                    <div class="space-y-4">
+                         <div><label for="onOrder" class="block text-sm font-medium text-gray-700 mb-1">O/O</label><input type="number" id="onOrder" min="0" value="0" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></div>
+                        <div><label for="availQty" class="block text-sm font-medium text-gray-700 mb-1">Avail Qty</label><input type="number" id="availQty" min="0" value="0" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm" required></div>
+                         <div><label for="minStock" class="block text-sm font-medium text-gray-700 mb-1">Estoque Mínimo</label><input type="number" id="minStock" min="0" value="0" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></div>
+                    </div>
+                    <div class="space-y-4">
+                        <div><label for="w52" class="block text-sm font-medium text-gray-700 mb-1">52W</label><input type="number" id="w52" min="0" value="0" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></div>
+                        <div><label for="w12" class="block text-sm font-medium text-gray-700 mb-1">12W</label><input type="number" id="w12" min="0" value="0" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></div>
+                        <div><label for="w4" class="block text-sm font-medium text-gray-700 mb-1">4W</label><input type="number" id="w4" min="0" value="0" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></div>
+                    </div>
+                    <div class="space-y-4">
+                        <div><label for="leadtime" class="block text-sm font-medium text-gray-700 mb-1">LEADTIME</label><input type="number" id="leadtime" min="0" value="0" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></div>
+                        <div><label for="gpl" class="block text-sm font-medium text-gray-700 mb-1">GPL</label><input type="text" id="gpl" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></div>
+                        <div><label for="fastTrack" class="block text-sm font-medium text-gray-700 mb-1">Fast Track</label><input type="text" id="fastTrack" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"></div>
+                    </div>
+                </div>
+                <div class="flex justify-end space-x-4 mt-8">
+                    <button type="button" id="cancelBtn" class="bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded-lg hover:bg-gray-300 transition duration-300">Cancelar</button>
+                    <button type="submit" class="bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-indigo-700 transition duration-300">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, collection, addDoc, setDoc, deleteDoc, onSnapshot, query, getDocs, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Data parsed from att3.txt
+        const initialProducts = [
+            { vendor: "CISCO", sku: "3767786", mfg: "C1200-24T-4G", onOrder: 1, availQty: 3, total: 4, w52: 9, w12: 4, w4: 2, leadtime: 72, minStock: 4, gpl: "366,47", fastTrack: "35%", toBuyUserOverride: null },
+            { vendor: "CISCO", sku: "3805309", mfg: "C1200-48T-4G", onOrder: 5, availQty: 0, total: 0, w52: 6, w12: 4, w4: 1, leadtime: 44, minStock: 2, gpl: "702,81", fastTrack: "40%", toBuyUserOverride: null },
+            { vendor: "CISCO", sku: "3805810", mfg: "C1300-24P-4X", onOrder: 5, availQty: 0, total: 0, w52: 0, w12: 0, w4: 0, leadtime: 47, minStock: 0, gpl: "1.290,47", fastTrack: "35%", toBuyUserOverride: null },
+            { vendor: "CISCO", sku: "3804300", mfg: "C1300-48FP-4X", onOrder: 0, availQty: 5, total: 5, w52: 31, w12: 28, w4: 10, leadtime: 58, minStock: 18, gpl: "2.611,51", fastTrack: "35%", toBuyUserOverride: null },
+            { vendor: "CISCO", sku: "3805313", mfg: "C1300-48P-4G", onOrder: 0, availQty: 0, total: 0, w52: 24, w12: 5, w4: 2, leadtime: 44, minStock: 3, gpl: "1.657,02", fastTrack: "35%", toBuyUserOverride: null },
+            { vendor: "CISCO", sku: "3805809", mfg: "C1300-48P-4X", onOrder: 5, availQty: 0, total: 0, w52: 6, w12: 5, w4: 3, leadtime: 79, minStock: 5, gpl: "2.043,92", fastTrack: "35%", toBuyUserOverride: null },
+            { vendor: "CISCO", sku: "3801813", mfg: "C1300-48T-4G", onOrder: 10, availQty: 0, total: 0, w52: 12, w12: 12, w4: 5, leadtime: 58, minStock: 8, gpl: "1.029,25", fastTrack: "35%", toBuyUserOverride: null },
+            { vendor: "CISCOBR", sku: "3517001", mfg: "C9115AXI-Z", onOrder: 20, availQty: 4, total: 4, w52: 116, w12: 32, w4: 15, leadtime: 33, minStock: 12, gpl: "12.715,20", fastTrack: "59%", toBuyUserOverride: null },
+            { vendor: "CISCOBR", sku: "3515985", mfg: "C9120AXI-Z", onOrder: 0, availQty: 14, total: 16, w52: 13, w12: 0, w4: 0, leadtime: 33, minStock: 0, gpl: "20.361,32", fastTrack: "56%", toBuyUserOverride: null },
+            { vendor: "CISCOBR", sku: "3515630", mfg: "C9200L-24P-4G-E", onOrder: 1, availQty: 0, total: 0, w52: 45, w12: 4, w4: 1, leadtime: 33, minStock: 2, gpl: "29.285,98", fastTrack: "69%", toBuyUserOverride: null },
+            { vendor: "CISCOBR", sku: "3516060", mfg: "C9200L-24P-4X-E", onOrder: 0, availQty: 0, total: 0, w52: 8, w12: 0, w4: 0, leadtime: 33, minStock: 0, gpl: "44.968,82", fastTrack: "44%", toBuyUserOverride: null },
+            { vendor: "CISCOBR", sku: "3515996", mfg: "C9200L-24T-4G-E", onOrder: 0, availQty: 6, total: 10, w52: 7, w12: 0, w4: 0, leadtime: 34, minStock: 0, gpl: "20.333,81", fastTrack: "69%", toBuyUserOverride: null },
+            { vendor: "CISCOBR", sku: "3518129", mfg: "C9200L-24T-4X-E", onOrder: 0, availQty: 0, total: 0, w52: 0, w12: 0, w4: 0, leadtime: 34, minStock: 0, gpl: "36.016,65", fastTrack: "44%", toBuyUserOverride: null },
+            { vendor: "CISCOBR", sku: "3515982", mfg: "C9200L-48P-4G-E", onOrder: 3, availQty: 0, total: 2, w52: 15, w12: 4, w4: 2, leadtime: 33, minStock: 2, gpl: "61.937,30", fastTrack: "66%", toBuyUserOverride: null },
+            { vendor: "CISCOBR", sku: "3516199", mfg: "C9200L-48P-4X-E", onOrder: 0, availQty: 0, total: 2, w52: 14, w12: 1, w4: 0, leadtime: 33, minStock: 1, gpl: "77.620,14", fastTrack: "70%", toBuyUserOverride: null },
+            { vendor: "CISCOBR", sku: "3516994", mfg: "C9200L-48T-4G-E", onOrder: 0, availQty: 9, total: 9, w52: 7, w12: 0, w4: 0, leadtime: 33, minStock: 0, gpl: "35.052,43", fastTrack: "55%", toBuyUserOverride: null },
+            { vendor: "CISCOBR", sku: "3518130", mfg: "C9200L-48T-4X-E", onOrder: 0, availQty: 3, total: 4, w52: 2, w12: 0, w4: 0, leadtime: 34, minStock: 0, gpl: "50.735,27", fastTrack: "42%", toBuyUserOverride: null },
+            { vendor: "CISCOBR", sku: "3516200", mfg: "C9200L-STACK-KIT=", onOrder: 2, availQty: 0, total: 6, w52: 28, w12: 4, w4: 1, leadtime: 34, minStock: 2, gpl: "14.378,30", fastTrack: "51%", toBuyUserOverride: null },
+            { vendor: "CISCO", sku: "1998214", mfg: "GLC-LH-SMD=", onOrder: 2, availQty: 18, total: 18, w52: 69, w12: 4, w4: 1, leadtime: 47, minStock: 3, gpl: "1.213,46", fastTrack: "67%", toBuyUserOverride: null },
+            { vendor: "CISCO", sku: "1997504", mfg: "GLC-SX-MMD=", onOrder: 2, availQty: 16, total: 16, w52: 60, w12: 6, w4: 2, leadtime: 47, minStock: 4, gpl: "612,63", fastTrack: "67%", toBuyUserOverride: null },
+            { vendor: "CISCO", sku: "2098134", mfg: "GLC-TE=", onOrder: 12, availQty: 8, total: 8, w52: 63, w12: 0, w4: 0, leadtime: 47, minStock: 0, gpl: "557,02", fastTrack: "67%", toBuyUserOverride: null },
+            { vendor: "CISCO", sku: "2037036", mfg: "SFP-10G-LR-S=", onOrder: 0, availQty: 3, total: 5, w52: 4, w12: 0, w4: 0, leadtime: 72, minStock: 0, gpl: "2.458,75", fastTrack: "67%", toBuyUserOverride: null },
+            { vendor: "CISCO", sku: "2036815", mfg: "SFP-10G-SR-S=", onOrder: 17, availQty: 3, total: 3, w52: 32, w12: 4, w4: 1, leadtime: 47, minStock: 3, gpl: "860,98", fastTrack: "67%", toBuyUserOverride: null }
+        ];
+
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        let userId = null;
+        let allProducts = [];
+        let sortState = { key: 'sku', direction: 'asc' };
+        let ptaxRate = null;
+        let inventoryPieChart = null;
+
+        const columnDefinitions = {
+            checkbox: { label: '<input type="checkbox" id="selectAllCheckbox" />', key: 'checkbox', sortable: false, class: 'px-2 py-4 text-center w-12 align-middle' },
+            vendor: { label: 'VENDOR', key: 'vendor', sortable: true, class: 'px-4 py-4 align-middle' },
+            sku: { label: 'SKU', key: 'sku', sortable: true, class: 'px-4 py-4 align-middle' },
+            mfg: { label: 'MFG#', key: 'mfg', sortable: true, class: 'px-4 py-4 align-middle' },
+            onOrder: { label: 'O/O', key: 'onOrder', sortable: true, class: 'px-4 py-4 text-center align-middle' },
+            availQty: { label: 'Avail Qty', key: 'availQty', sortable: true, class: 'px-4 py-4 text-center align-middle' },
+            total: { label: 'TOTAL', key: 'total', sortable: true, class: 'px-4 py-4 text-center align-middle' },
+            w52: { label: '52W', key: 'w52', sortable: true, class: 'px-4 py-4 text-center align-middle' },
+            w12: { label: '12W', key: 'w12', sortable: true, class: 'px-4 py-4 text-center align-middle' },
+            w4: { label: '4W', key: 'w4', sortable: true, class: 'px-4 py-4 text-center align-middle' },
+            leadtime: { label: 'LEADTIME', key: 'leadtime', sortable: true, class: 'px-4 py-4 text-center align-middle' },
+            minStock: { label: 'Estoque Min', key: 'minStock', sortable: true, class: 'px-4 py-4 text-center align-middle' },
+            toBuy: { label: 'Comprar', key: 'toBuy', sortable: true, class: 'px-4 py-4 text-center align-middle' },
+            gpl: { label: 'GPL', key: 'gpl', sortable: true, class: 'px-4 py-4 text-right align-middle' },
+            fastTrack: { label: 'Fast Track', key: 'fastTrack', sortable: true, class: 'px-4 py-4 text-center align-middle' },
+            fob: { label: 'FOB', key: 'fob', sortable: true, class: 'px-4 py-4 text-right align-middle' },
+            actions: { label: 'Ações', key: 'actions', sortable: false, class: 'px-4 py-4 text-center align-middle' }
+        };
+
+        let columnOrder = ['checkbox', 'vendor', 'sku', 'mfg', 'onOrder', 'availQty', 'total', 'w52', 'w12', 'w4', 'leadtime', 'minStock', 'toBuy', 'gpl', 'fastTrack', 'fob', 'actions'];
+
+        const productList = document.getElementById('product-list');
+        const productModal = document.getElementById('productModal');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const productForm = document.getElementById('productForm');
+        const modalTitle = document.getElementById('modalTitle');
+        const loadingState = document.getElementById('loadingState');
+        const emptyState = document.getElementById('emptyState');
+        const ciscoAlertList = document.getElementById('cisco-alert-list');
+        const ciscobrAlertList = document.getElementById('ciscobr-alert-list');
+        const ciscoAlertFooter = document.getElementById('cisco-alert-footer');
+        const ciscobrAlertFooter = document.getElementById('ciscobr-alert-footer');
+        const tableHeaders = document.getElementById('table-headers');
+        const exportUsdBtn = document.getElementById('exportUsdBtn');
+        const exportBrlBtn = document.getElementById('exportBrlBtn');
+        const agingAlertList = document.getElementById('aging-alert-list');
+
+        const getPreviousDayPtaxRate = async () => {
+            let date = new Date();
+            for (let i = 0; i < 10; i++) { // Try for up to 10 days ago
+                date.setDate(date.getDate() - 1);
+                let month = (date.getMonth() + 1).toString().padStart(2, '0');
+                let day = date.getDate().toString().padStart(2, '0');
+                let year = date.getFullYear();
+                const formattedDate = `${month}-${day}-${year}`;
+                const url = `https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/CotacaoDolarDia(dataCotacao=@dataCotacao)?@dataCotacao='${formattedDate}'&$top=100&$format=json`;
+                
+                try {
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    if (data.value && data.value.length > 0) {
+                        ptaxRate = data.value[0].cotacaoVenda;
+                        console.log(`PTAX Rate for ${formattedDate}: ${ptaxRate}`);
+                        updateInventoryTotals(allProducts); // Re-render chart with the fetched rate
+                        return;
+                    }
+                } catch (error) {
+                    console.error("Error fetching PTAX rate for", formattedDate, error);
+                }
+            }
+            console.warn("Could not fetch PTAX rate. Using default.");
+            ptaxRate = 5.45; // Fallback
+            updateInventoryTotals(allProducts);
+        };
+
+        const openModal = (product = null) => {
+            productForm.reset();
+            if (product) {
+                modalTitle.textContent = 'Editar Produto';
+                document.getElementById('productId').value = product.id;
+                document.getElementById('vendor').value = product.vendor || '';
+                document.getElementById('sku').value = product.sku || '';
+                document.getElementById('mfg').value = product.mfg || '';
+                document.getElementById('onOrder').value = product.onOrder || 0;
+                document.getElementById('availQty').value = product.availQty || 0;
+                document.getElementById('w52').value = product.w52 || 0;
+                document.getElementById('w12').value = product.w12 || 0;
+                document.getElementById('w4').value = product.w4 || 0;
+                document.getElementById('leadtime').value = product.leadtime || 0;
+                document.getElementById('minStock').value = product.minStock || 0;
+                document.getElementById('gpl').value = product.gpl || '';
+                document.getElementById('fastTrack').value = product.fastTrack || '';
+            }
+            productModal.classList.remove('hidden');
+        };
+
+        const closeModal = (modal) => modal.classList.add('hidden');
+
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                userId = user.uid;
+                await seedDatabase();
+                listenForProductUpdates();
+            } else {
+                 try {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch (error) { console.error("Erro na autenticação:", error); }
+            }
+        });
+
+        const getProductsCollection = () => collection(db, `artifacts/${appId}/public/data/products_v2`);
+
+        const seedDatabase = async () => {
+            const productsCollection = getProductsCollection();
+            const snapshot = await getDocs(query(productsCollection));
+            if (snapshot.empty) {
+                console.log("Populando o banco de dados com dados iniciais...");
+                const batch = writeBatch(db);
+                initialProducts.forEach(productData => {
+                    const docRef = doc(productsCollection);
+                    batch.set(docRef, productData);
+                });
+                await batch.commit();
+                console.log("Banco de dados populado.");
+            }
+        };
+
+        const listenForProductUpdates = () => {
+            if (!userId) return;
+            const productsCollection = getProductsCollection();
+            onSnapshot(query(productsCollection), (snapshot) => {
+                loadingState.classList.add('hidden');
+                allProducts = snapshot.docs.map(doc => {
+                    const p = { id: doc.id, ...doc.data() };
+                    if (!p.minStockUserOverride) {
+                        p.minStock = calculateSuggestedMinStock(p);
+                    }
+                    return p;
+                });
+
+                if (snapshot.empty) {
+                    emptyState.classList.remove('hidden');
+                    productList.innerHTML = '';
+                    productList.appendChild(emptyState);
+                } else {
+                    emptyState.classList.add('hidden');
+                    renderTableHeaders();
+                    sortAndRender();
+                }
+                renderLowStockAlerts(allProducts);
+                updateInventoryTotals(allProducts);
+                renderAgingAlerts(allProducts);
+            }, (error) => {
+                console.error("Erro ao buscar produtos: ", error);
+                loadingState.classList.add('hidden');
+                productList.innerHTML = `<td colspan="17" class="text-center py-10 text-red-500">Erro ao carregar dados.</td>`;
+            });
+        };
+
+        const saveProduct = async (event) => {
+            event.preventDefault();
+            if (!userId) return;
+            const id = document.getElementById('productId').value;
+            const productData = {
+                vendor: document.getElementById('vendor').value, sku: document.getElementById('sku').value, mfg: document.getElementById('mfg').value,
+                onOrder: parseInt(document.getElementById('onOrder').value, 10) || 0, availQty: parseInt(document.getElementById('availQty').value, 10) || 0,
+                w52: parseInt(document.getElementById('w52').value, 10) || 0, w12: parseInt(document.getElementById('w12').value, 10) || 0,
+                w4: parseInt(document.getElementById('w4').value, 10) || 0, leadtime: parseInt(document.getElementById('leadtime').value, 10) || 0,
+                minStock: parseInt(document.getElementById('minStock').value, 10) || 0, gpl: document.getElementById('gpl').value,
+                fastTrack: document.getElementById('fastTrack').value, owner: userId
+            };
+            try {
+                await setDoc(doc(db, `artifacts/${appId}/public/data/products_v2`, id), productData, { merge: true });
+                closeModal(productModal);
+            } catch (error) { console.error("Erro ao salvar produto: ", error); }
+        };
+        
+        const deleteProduct = async (id) => {
+            if (!userId || !id) return;
+            try {
+                await deleteDoc(doc(db, `artifacts/${appId}/public/data/products_v2`, id));
+                console.log("Produto deletado:", id);
+            } catch (error) {
+                console.error("Erro ao deletar produto: ", error);
+            }
+        };
+
+        const updateProductField = async (id, field, value) => {
+            const productRef = doc(db, `artifacts/${appId}/public/data/products_v2`, id);
+            try {
+                await updateDoc(productRef, { [field]: value });
+            } catch (error) {
+                console.error("Erro ao atualizar o campo:", error);
+            }
+        };
+
+        const parseNumber = (value) => parseFloat(String(value || '0').replace(/\./g, '').replace(',', '.')) || 0;
+        const parsePercentage = (value) => parseNumber(String(value || '0').replace('%', '')) / 100;
+        const calculateFob = (p) => {
+            const gpl = parseNumber(p.gpl);
+            const ft = parsePercentage(p.fastTrack);
+            return gpl * (1 - ft);
+        };
+        
+        const calculateToBuy = (p) => {
+            const minStock = p.minStock || 0;
+            const availQty = p.availQty || 0;
+            const onOrder = p.onOrder || 0;
+            const leadtime = p.leadtime || 0;
+            const ttl91d = p.w12 || 0; // Using 12W as the base for 91 days
+
+            const dailySales = ttl91d > 0 ? ttl91d / 84 : 0; // 12 weeks = 84 days
+            const leadtimeDemand = dailySales * leadtime;
+            
+            const suggestedStock = minStock + leadtimeDemand;
+            const toBuy = suggestedStock - (availQty + onOrder);
+
+            return Math.max(0, Math.ceil(toBuy));
+        };
+
+        const calculateSuggestedMinStock = (p) => {
+            const leadtime = p.leadtime || 0;
+            const ttl91d = p.w12 || 0; // Using 12W as the base for 91 days
+            const dailySales = ttl91d > 0 ? ttl91d / 84 : 0;
+            const suggestedMinStock = dailySales * leadtime;
+            return Math.ceil(suggestedMinStock);
+        };
+
+        const sortAndRender = () => {
+            const sortedProducts = [...allProducts];
+            const key = sortState.key;
+            const direction = sortState.direction;
+            
+            sortedProducts.sort((a, b) => {
+                let valA, valB;
+                if (key === 'total') { valA = a.total || 0; valB = b.total || 0; } 
+                else if (key === 'toBuy') { 
+                    valA = typeof a.toBuyUserOverride === 'number' ? a.toBuyUserOverride : calculateToBuy(a);
+                    valB = typeof b.toBuyUserOverride === 'number' ? b.toBuyUserOverride : calculateToBuy(b);
+                } 
+                else if (key === 'fob') { valA = calculateFob(a); valB = calculateFob(b); }
+                else { valA = a[key]; valB = b[key]; }
+
+                const numA = parseNumber(valA);
+                const numB = parseNumber(valB);
+
+                if (!isNaN(numA) && !isNaN(numB) && (typeof valA !== 'string' || String(valA).match(/^[0-9,.\s%]*$/)) && (typeof valB !== 'string' || String(valB).match(/^[0-9,.\s%]*$/))) {
+                    if (numA < numB) return -1;
+                    if (numA > numB) return 1;
+                    return 0;
+                } else {
+                    const strA = String(valA || '').toLowerCase();
+                    const strB = String(valB || '').toLowerCase();
+                    return strA.localeCompare(strB);
+                }
+            });
+
+            if (direction === 'desc') sortedProducts.reverse();
+            
+            updateSortIcons();
+            renderProducts(sortedProducts);
+        };
+
+        const updateSortIcons = () => {
+            document.querySelectorAll('.sortable-header').forEach(header => {
+                const icon = header.querySelector('.sort-icon');
+                const key = header.dataset.sortKey;
+                header.classList.remove('sorted');
+                if (icon) icon.className = 'fas fa-sort sort-icon';
+                if (key === sortState.key) {
+                    header.classList.add('sorted');
+                    if (icon) icon.className = `fas fa-sort-${sortState.direction === 'asc' ? 'up' : 'down'} sort-icon`;
+                }
+            });
+        };
+
+        const renderTableHeaders = () => {
+            tableHeaders.innerHTML = '';
+            columnOrder.forEach(key => {
+                const def = columnDefinitions[key];
+                const th = document.createElement('th');
+                th.className = def.class;
+                if (def.sortable) {
+                    th.classList.add('sortable-header');
+                    th.dataset.sortKey = def.key;
+                    th.innerHTML = `${def.label}<i class="fas fa-sort sort-icon"></i>`;
+                    th.draggable = true;
+                } else {
+                    th.innerHTML = def.label;
+                }
+                tableHeaders.appendChild(th);
+            });
+        };
+
+        const renderProducts = (products) => {
+            productList.innerHTML = '';
+            if (products.length === 0) {
+                productList.appendChild(emptyState);
+                emptyState.classList.remove('hidden');
+                return;
+            }
+            emptyState.classList.add('hidden');
+            products.forEach(p => {
+                const total = p.total;
+                const toBuyValue = typeof p.toBuyUserOverride === 'number' ? p.toBuyUserOverride : calculateToBuy(p);
+                const fob = calculateFob(p);
+                const tr = document.createElement('tr');
+                tr.productData = p;
+                tr.className = `bg-white border-b hover:bg-gray-100 ${(p.availQty || 0) < (p.minStock || 0) && (p.minStock || 0) > 0 ? 'bg-red-50' : ''}`;
+                
+                const cells = {
+                    checkbox: `<div class="flex justify-center items-center h-full"><input type="checkbox" class="row-checkbox" data-id="${p.id}" /></div>`,
+                    vendor: p.vendor || '',
+                    sku: `<span class="font-medium text-gray-900">${p.sku}</span>`,
+                    mfg: p.mfg || '',
+                    onOrder: p.onOrder || 0,
+                    availQty: `<span class="font-bold ${(p.availQty || 0) < (p.minStock || 0) && (p.minStock || 0) > 0 ? 'text-red-600' : 'text-gray-800'}">${p.availQty || 0}</span>`,
+                    total: total,
+                    w52: p.w52 || 0,
+                    w12: p.w12 || 0,
+                    w4: p.w4 || 0,
+                    leadtime: p.leadtime || 0,
+                    minStock: `<div class="flex items-center justify-center">
+                                 <input type="number" value="${p.minStock || 0}" data-id="${p.id}" class="min-stock-input editable-input">
+                               </div>`,
+                    toBuy: `<div class="flex items-center justify-center">
+                                <input type="number" value="${toBuyValue}" data-id="${p.id}" class="to-buy-input editable-input">
+                                <button data-id="${p.id}" class="recalculate-buy-btn ml-2 text-blue-500 hover:text-blue-700" title="Recalcular Sugestão">
+                                    <i class="fa-solid fa-arrow-rotate-left"></i>
+                                </button>
+                            </div>`,
+                    gpl: p.gpl || '',
+                    fastTrack: p.fastTrack || '',
+                    fob: fob.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                    actions: `<button data-id="${p.id}" class="edit-btn text-indigo-600 hover:text-indigo-900 mr-2"><i class="fas fa-pencil-alt"></i></button>
+                              <button data-id="${p.id}" class="delete-btn text-red-600 hover:text-red-900"><i class="fas fa-trash-alt"></i></button>`
+                };
+
+                columnOrder.forEach(key => {
+                    const td = document.createElement('td');
+                    const def = columnDefinitions[key];
+                    td.className = `${def.class.replace('py-4', 'py-2')} whitespace-nowrap`;
+                    td.innerHTML = cells[key];
+                    tr.appendChild(td);
+                });
+                productList.appendChild(tr);
+            });
+        };
+
+        const renderAlertTable = (vendorList, element, footerElement, currency) => {
+            element.innerHTML = '';
+            if (vendorList.length === 0) {
+                element.innerHTML = `<tr><td colspan="8" class="text-center p-4 text-gray-500">Nenhum alerta para este vendor.</td></tr>`;
+                footerElement.innerHTML = '';
+                return;
+            }
+            vendorList.forEach(p => {
+                const toBuy = typeof p.toBuyUserOverride === 'number' ? p.toBuyUserOverride : calculateToBuy(p);
+                if (toBuy <= 0) return;
+                
+                const fobInBRL = calculateFob(p);
+                let displayFob = fobInBRL;
+                
+                if (currency === 'USD' && ptaxRate) {
+                    displayFob = fobInBRL / ptaxRate;
+                }
+                
+                const purchaseValue = toBuy * displayFob;
+
+                const row = document.createElement('tr');
+                row.className = 'border-b hover:bg-gray-100';
+                row.dataset.purchaseValue = purchaseValue;
+                row.innerHTML = `
+                    <td class="px-2 py-2 w-12 text-center"><input type="checkbox" class="alert-checkbox" data-vendor="${p.vendor}"></td>
+                    <td class="px-4 py-2 text-left whitespace-nowrap">${p.mfg}</td>
+                    <td class="px-4 py-2 text-left whitespace-nowrap">${p.sku}</td>
+                    <td class="px-4 py-2 text-center">${p.minStock || 0}</td>
+                    <td class="px-4 py-2 text-center">${p.fastTrack || ''}</td>
+                    <td class="px-4 py-2 text-right">${displayFob.toLocaleString(currency === 'USD' ? 'en-US' : 'pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td class="px-4 py-2 text-center font-bold text-blue-600">${toBuy}</td>
+                    <td class="px-4 py-2 text-right font-semibold">
+                        <div class="accounting-format">
+                            <span>${currency === 'USD' ? 'US$' : 'R$'}</span>
+                            <span>${purchaseValue.toLocaleString(currency === 'USD' ? 'en-US' : 'pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                    </td>
+                `;
+                element.appendChild(row);
+            });
+            updateAlertTotal(vendorList.length > 0 ? vendorList[0].vendor : null);
+        };
+        
+        const renderAgingAlerts = (products) => {
+            agingAlertList.innerHTML = '';
+            const productsInStock = products.filter(p => (p.availQty || 0) > 0);
+
+            if (productsInStock.length === 0) {
+                agingAlertList.innerHTML = `<tr><td colspan="12" class="text-center p-4 text-gray-500">Nenhum produto com estoque disponível para análise de aging.</td></tr>`;
+                return;
+            }
+
+            productsInStock.forEach(p => {
+                const fob = calculateFob(p);
+                let remainingQty = p.availQty;
+
+                // Mock aging data distribution
+                const aging = {
+                    d180: Math.floor(remainingQty * (Math.random() * 0.1)), // 0-10%
+                    d150: 0, d120: 0, d90: 0, d60: 0, d30: 0, lt30: 0
+                };
+                remainingQty -= aging.d180;
+                aging.d150 = Math.floor(remainingQty * (Math.random() * 0.15)); // 0-15%
+                remainingQty -= aging.d150;
+                aging.d120 = Math.floor(remainingQty * (Math.random() * 0.20)); // 0-20%
+                remainingQty -= aging.d120;
+                aging.d90 = Math.floor(remainingQty * (Math.random() * 0.25)); // 0-25%
+                remainingQty -= aging.d90;
+                aging.d60 = Math.floor(remainingQty * (Math.random() * 0.30)); // 0-30%
+                remainingQty -= aging.d60;
+                aging.d30 = Math.floor(remainingQty * (Math.random() * 0.40)); // 0-40%
+                remainingQty -= aging.d30;
+                aging.lt30 = remainingQty;
+                
+                const tr = document.createElement('tr');
+                tr.className = 'border-b hover:bg-gray-50';
+                tr.innerHTML = `
+                    <td class="px-4 py-2">${p.vendor}</td>
+                    <td class="px-4 py-2">${p.mfg}</td>
+                    <td class="px-4 py-2">${p.sku}</td>
+                    <td class="px-4 py-2 text-right">${fob.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                    <td class="px-4 py-2 text-center font-bold">${p.availQty}</td>
+                    <td class="px-4 py-2 text-center">${aging.lt30 > 0 ? aging.lt30 : '-'}</td>
+                    <td class="px-4 py-2 text-center">${aging.d30 > 0 ? aging.d30 : '-'}</td>
+                    <td class="px-4 py-2 text-center">${aging.d60 > 0 ? aging.d60 : '-'}</td>
+                    <td class="px-4 py-2 text-center ${aging.d90 > 0 ? 'aging-highlight' : ''}">${aging.d90 > 0 ? aging.d90 : '-'}</td>
+                    <td class="px-4 py-2 text-center ${aging.d120 > 0 ? 'aging-highlight' : ''}">${aging.d120 > 0 ? aging.d120 : '-'}</td>
+                    <td class="px-4 py-2 text-center ${aging.d150 > 0 ? 'aging-highlight' : ''}">${aging.d150 > 0 ? aging.d150 : '-'}</td>
+                    <td class="px-4 py-2 text-center ${aging.d180 > 0 ? 'aging-highlight' : ''}">${aging.d180 > 0 ? aging.d180 : '-'}</td>
+                `;
+                agingAlertList.appendChild(tr);
+            });
+        };
+
+        const updateAlertTotal = (vendor) => {
+            if (!vendor) return;
+            const isUSD = vendor === 'CISCO';
+            const listId = isUSD ? 'cisco-alert-list' : 'ciscobr-alert-list';
+            const footerId = isUSD ? 'cisco-alert-footer' : 'ciscobr-alert-footer';
+            const listElement = document.getElementById(listId);
+            const footerElement = document.getElementById(footerId);
+            
+            let total = 0;
+            listElement.querySelectorAll('.alert-checkbox:checked').forEach(checkbox => {
+                total += parseFloat(checkbox.closest('tr').dataset.purchaseValue);
+            });
+
+            if (isUSD) {
+                 footerElement.innerHTML = `
+                    <td colspan="7" class="px-4 py-2 text-right font-bold">Total Selecionado:</td>
+                    <td class="px-4 py-2 text-right font-bold">
+                        <div class="accounting-format">
+                            <span>US$</span>
+                            <span>${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                    </td>`;
+            } else {
+                const totalInUSD = ptaxRate ? total / ptaxRate : 0;
+                footerElement.innerHTML = `
+                    <td colspan="5" class="px-4 py-2 text-right font-bold">Total Selecionado:</td>
+                    <td colspan="3" class="px-4 py-2 text-right font-bold">
+                        <div class="flex items-center justify-end space-x-2">
+                             <span id="brl-total-value">${total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                             <span class="text-gray-400">/</span>
+                             <span id="usd-total-value" class="text-gray-600">${totalInUSD.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
+                        </div>
+                    </td>`;
+            }
+        };
+
+        const renderLowStockAlerts = (products) => {
+            if (!ptaxRate) return; // Wait for PTAX rate before rendering alerts
+            const lowStockProducts = products.filter(p => (typeof p.toBuyUserOverride === 'number' ? p.toBuyUserOverride : calculateToBuy(p)) > 0);
+            const ciscoAlerts = lowStockProducts.filter(p => p.vendor === 'CISCO');
+            const ciscobrAlerts = lowStockProducts.filter(p => p.vendor === 'CISCOBR');
+            renderAlertTable(ciscoAlerts, ciscoAlertList, ciscoAlertFooter, 'USD');
+            renderAlertTable(ciscobrAlerts, ciscobrAlertList, ciscobrAlertFooter, 'BRL');
+        };
+
+        const renderPieChart = (totalUSD, totalBRL) => {
+            if (!ptaxRate) return;
+            const ctx = document.getElementById('inventoryPieChart').getContext('2d');
+            const totalUSDInBRL = totalUSD * ptaxRate;
+
+            const data = {
+                labels: ['Inventário BRL', 'Inventário USD (em BRL)'],
+                datasets: [{
+                    data: [totalBRL, totalUSDInBRL],
+                    backgroundColor: ['#005758', '#2D9F88'],
+                    hoverBackgroundColor: ['#004445', '#247F6C'],
+                    borderColor: '#fff',
+                    borderWidth: 2,
+                }]
+            };
+
+            if (inventoryPieChart) {
+                inventoryPieChart.destroy();
+            }
+
+            inventoryPieChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: data,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    layout: {
+                        padding: 20 // Add padding to avoid labels being cut off
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                boxWidth: 12,
+                                padding: 15,
+                                font: {
+                                    size: 10
+                                }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed !== null) {
+                                        label += new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(context.parsed);
+                                    }
+                                    return label;
+                                }
+                            }
+                        },
+                        datalabels: {
+                            formatter: (value, ctx) => {
+                                const percentage = (value / ctx.chart.getDatasetMeta(0).total) * 100;
+                                if (percentage < 5) {
+                                    return null; // Don't show a label for small slices
+                                }
+                                return new Intl.NumberFormat('pt-BR', { 
+                                    style: 'currency', 
+                                    currency: 'BRL', 
+                                    notation: 'compact',
+                                    compactDisplay: 'short'
+                                }).format(value);
+                            },
+                            anchor: 'end',
+                            align: 'end',
+                            offset: 8,
+                            color: '#4b5563', // Light gray font color for external labels
+                            font: {
+                                weight: 'bold',
+                                size: 12,
+                            }
+                        }
+                    }
+                },
+                plugins: [ChartDataLabels],
+            });
+        };
+
+        const updateInventoryTotals = (products) => {
+            let totalInventoryValueUSD = 0;
+            let totalInventoryValueBRL = 0;
+
+            products.forEach(p => {
+                const totalQty = p.total || 0; // Use total from file data
+                const fobValue = calculateFob(p);
+                const productInventoryValue = totalQty * fobValue;
+
+                if (p.vendor === 'CISCO') {
+                    totalInventoryValueUSD += productInventoryValue;
+                } else if (p.vendor === 'CISCOBR') {
+                    totalInventoryValueBRL += productInventoryValue;
+                }
+            });
+
+            document.getElementById('totalInventoryUSD').textContent = totalInventoryValueUSD.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+            document.getElementById('totalInventoryBRL').textContent = totalInventoryValueBRL.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+            
+            renderPieChart(totalInventoryValueUSD, totalInventoryValueBRL);
+        };
+        
+        const exportToExcel = (vendor) => {
+            const isUSD = vendor === 'CISCO';
+            const dataToExport = allProducts.filter(p => p.vendor === vendor && (typeof p.toBuyUserOverride === 'number' ? p.toBuyUserOverride : calculateToBuy(p)) > 0);
+            
+            const formatForExport = (data) => {
+                return data.map(p => {
+                    const toBuy = typeof p.toBuyUserOverride === 'number' ? p.toBuyUserOverride : calculateToBuy(p);
+                    const fobInBRL = calculateFob(p);
+                    let displayFob = fobInBRL;
+                    if (isUSD && ptaxRate) {
+                        displayFob = fobInBRL / ptaxRate;
+                    }
+                    const purchaseValue = toBuy * displayFob;
+                    return {
+                        'MFG#': p.mfg,
+                        'SKU': p.sku,
+                        'Mínimo': p.minStock || 0,
+                        'Fast Track': p.fastTrack,
+                        'FOB': displayFob,
+                        'Comprar': toBuy,
+                        'Valor Compra': purchaseValue
+                    };
+                });
+            };
+
+            const formattedData = formatForExport(dataToExport);
+            const worksheet = XLSX.utils.json_to_sheet(formattedData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, `Alertas ${isUSD ? 'USD' : 'BRL'}`);
+            XLSX.writeFile(workbook, `alertas_${isUSD ? 'usd' : 'brl'}.xlsx`);
+        };
+
+        const updateSelectionState = () => {
+            const anySelected = productList.querySelector('.row-checkbox:checked');
+            if (anySelected) {
+                productList.classList.add('has-selection');
+            } else {
+                productList.classList.remove('has-selection');
+            }
+        };
+
+        // --- Event Listeners ---
+        cancelBtn.addEventListener('click', () => closeModal(productModal));
+        productForm.addEventListener('submit', saveProduct);
+        exportUsdBtn.addEventListener('click', () => exportToExcel('CISCO'));
+        exportBrlBtn.addEventListener('click', () => exportToExcel('CISCOBR'));
+        
+        let draggedColumn = null;
+        tableHeaders.addEventListener('dragstart', (e) => {
+            draggedColumn = e.target;
+            e.target.classList.add('dragging');
+        });
+        tableHeaders.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            const target = e.target.closest('th');
+            if (target && target !== draggedColumn) {
+                document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+                target.classList.add('drag-over');
+            }
+        });
+        tableHeaders.addEventListener('dragleave', (e) => {
+            e.target.closest('th')?.classList.remove('drag-over');
+        });
+        tableHeaders.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const target = e.target.closest('th');
+            if (target && draggedColumn) {
+                const fromIndex = Array.from(target.parentNode.children).indexOf(draggedColumn);
+                const toIndex = Array.from(target.parentNode.children).indexOf(target);
+                if (fromIndex !== toIndex) {
+                    const item = columnOrder.splice(fromIndex, 1)[0];
+                    columnOrder.splice(toIndex, 0, item);
+                    renderTableHeaders();
+                    sortAndRender();
+                }
+            }
+            document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        });
+        tableHeaders.addEventListener('dragend', (e) => {
+            if (draggedColumn) {
+                draggedColumn.classList.remove('dragging');
+                draggedColumn = null;
+            }
+        });
+
+        tableHeaders.addEventListener('click', (e) => {
+            const header = e.target.closest('.sortable-header');
+            if (header) {
+                const key = header.dataset.sortKey;
+                if (sortState.key === key) {
+                    sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+                } else {
+                    sortState.key = key;
+                    sortState.direction = 'asc';
+                }
+                sortAndRender();
+            } else if (e.target.id === 'selectAllCheckbox') {
+                const isChecked = e.target.checked;
+                document.querySelectorAll('.row-checkbox').forEach(cb => {
+                    cb.checked = isChecked;
+                    cb.closest('tr').classList.toggle('highlighted-row', isChecked);
+                });
+                updateSelectionState();
+            }
+        });
+
+        productList.addEventListener('change', (e) => {
+            const id = e.target.dataset.id;
+            const newValue = parseInt(e.target.value, 10);
+            if (e.target.classList.contains('min-stock-input')) {
+                if (!isNaN(newValue)) {
+                    updateProductField(id, 'minStock', newValue);
+                    updateProductField(id, 'minStockUserOverride', true);
+                }
+            } else if (e.target.classList.contains('to-buy-input')) {
+                if (!isNaN(newValue)) {
+                    updateProductField(id, 'toBuyUserOverride', newValue);
+                }
+            }
+        });
+        
+        productList.addEventListener('click', (e) => {
+            const button = e.target.closest('button');
+            if (button) {
+                const id = button.dataset.id;
+                const product = allProducts.find(p => p.id === id);
+                if (button.classList.contains('edit-btn')) {
+                    if (product) openModal(product);
+                } else if (button.classList.contains('delete-btn')) {
+                    deleteProduct(id);
+                } else if (button.classList.contains('recalculate-buy-btn')) {
+                    updateProductField(id, 'toBuyUserOverride', null);
+                }
+            } else {
+                 const tr = e.target.closest('tr');
+                 if (!tr || e.target.closest('input') || e.target.closest('button')) return;
+                 const checkbox = tr.querySelector('.row-checkbox');
+                 if(checkbox) {
+                    checkbox.checked = !checkbox.checked;
+                    tr.classList.toggle('highlighted-row', checkbox.checked);
+                    updateSelectionState();
+                 }
+            }
+        });
+
+        document.getElementById('alertSection').addEventListener('click', (e) => {
+            const tr = e.target.closest('tr');
+            if (!tr) return;
+            const checkbox = tr.querySelector('.alert-checkbox');
+            if (checkbox && e.target !== checkbox) {
+                checkbox.checked = !checkbox.checked;
+            }
+            if (checkbox) {
+                updateAlertTotal(checkbox.dataset.vendor);
+            } else if (e.target.classList.contains('select-all-alert')) {
+                const vendor = e.target.dataset.vendor;
+                const listId = vendor === 'CISCO' ? 'cisco-alert-list' : 'ciscobr-alert-list';
+                document.querySelectorAll(`#${listId} .alert-checkbox`).forEach(cb => {
+                    cb.checked = e.target.checked;
+                });
+                updateAlertTotal(vendor);
+            }
+        });
+        
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeModal(productModal);
+            }
+        });
+
+        // Initial fetch of PTAX rate
+        getPreviousDayPtaxRate();
+
+    </script>
+</body>
+</html>
